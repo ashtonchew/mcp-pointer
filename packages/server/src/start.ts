@@ -13,7 +13,7 @@ let elementProcessor: ElementProcessor;
 function initializeServices(port: string | number): void {
   sharedState = new SharedStateService();
   wsService = new WebSocketService(port);
-  mcpService = new MCPService(sharedState);
+  mcpService = new MCPService(sharedState, wsService);
   elementProcessor = new ElementProcessor();
 }
 
@@ -45,11 +45,13 @@ function setupProcessHandlers(): void {
   process.on('SIGUSR2', gracefulShutdown); // For nodemon
 }
 
-function startWebSocketService(): void {
-  wsService.start().catch((error) => {
+async function startWebSocketService(): Promise<void> {
+  try {
+    await wsService.start();
+  } catch (error) {
     // WebSocket errors are non-fatal - MCP can still work
     logger.error('WebSocket service error (non-fatal):', error);
-  });
+  }
 }
 
 async function startMCPService(): Promise<void> {
@@ -63,8 +65,9 @@ function handleStartupError(error: unknown): void {
 
 async function startServices(): Promise<void> {
   try {
-    // Start WebSocket in background (non-blocking)
-    startWebSocketService();
+    // Start WebSocket service and wait for it to be ready
+    // This ensures the server is listening before MCP starts accepting calls
+    await startWebSocketService();
 
     // Start MCP service (critical - must succeed)
     await startMCPService();
