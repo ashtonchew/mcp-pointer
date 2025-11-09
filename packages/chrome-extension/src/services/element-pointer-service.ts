@@ -20,6 +20,8 @@ export default class ElementPointerService {
 
   private pointedElement: HTMLElement | null = null;
 
+  private pointedElementMetadata: { selector: string; timestamp: number } | null = null;
+
   constructor() {
     this.triggerKeyService = new TriggerKeyService({
       onTriggerKeyStart: this.startPointing.bind(this),
@@ -73,7 +75,7 @@ export default class ElementPointerService {
   public disable(): void {
     this.overlayManagerService.clearOverlay(OverlayType.HOVER);
     this.overlayManagerService.clearOverlay(OverlayType.SELECTION);
-    this.pointedElement = null;
+    this.clearPointedElement();
     this.hoveredElement = null;
 
     this.triggerKeyService.unregisterListeners();
@@ -109,6 +111,12 @@ export default class ElementPointerService {
   private sendToBackground(target: HTMLElement): void {
     logger.info('📤 Sending target to background:', target);
 
+    // Store metadata for screenshot feature
+    this.pointedElementMetadata = {
+      selector: this.generateSelector(target),
+      timestamp: Date.now(),
+    };
+
     // Send directly to background script (isolated world has chrome.runtime access)
     chrome.runtime.sendMessage({
       type: 'DOM_ELEMENT_POINTED',
@@ -120,5 +128,74 @@ export default class ElementPointerService {
         logger.debug('✅ Element sent successfully:', response);
       }
     });
+  }
+
+  /**
+   * Get the last pointed element for screenshot capture
+   * Returns null if no element has been pointed or if element is no longer in DOM
+   */
+  public getLastPointedElement(): HTMLElement | null {
+    if (!this.pointedElement) {
+      return null;
+    }
+
+    // Check if element is still in the DOM
+    if (!document.contains(this.pointedElement)) {
+      logger.warn('⚠️ Last pointed element is no longer in the DOM');
+      this.clearPointedElement();
+      return null;
+    }
+
+    return this.pointedElement;
+  }
+
+  /**
+   * Get metadata about the last pointed element
+   */
+  public getLastPointedElementMetadata(): { selector: string; timestamp: number } | null {
+    return this.pointedElementMetadata;
+  }
+
+  /**
+   * Clear the pointed element reference
+   */
+  public clearPointedElement(): void {
+    this.pointedElement = null;
+    this.pointedElementMetadata = null;
+  }
+
+  /**
+   * Generate a CSS selector for an element
+   */
+  private generateSelector(element: HTMLElement): string {
+    if (element.id) {
+      return `#${element.id}`;
+    }
+
+    const path: string[] = [];
+    let current: Element | null = element;
+
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      let selector = current.nodeName.toLowerCase();
+
+      if (current.className && typeof current.className === 'string') {
+        const classes = current.className.trim().split(/\s+/).filter(c => c && !c.startsWith('mcp-pointer'));
+        if (classes.length > 0) {
+          selector += '.' + classes.slice(0, 2).join('.');
+        }
+      }
+
+      path.unshift(selector);
+
+      if (current.id) {
+        break;
+      }
+
+      current = current.parentElement;
+
+      if (path.length > 5) break; // Limit depth
+    }
+
+    return path.join(' > ');
   }
 }

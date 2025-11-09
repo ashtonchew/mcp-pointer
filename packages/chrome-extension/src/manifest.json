@@ -41,6 +41,12 @@
     }
   ],
   "permissions": [
-    "storage"
+    "storage",
+    "activeTab",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ]
 }

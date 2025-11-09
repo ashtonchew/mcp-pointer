@@ -1,10 +1,17 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
 import {
-  RawPointedDOMElement, PointerMessage, PointerMessageType, ConnectionStatus,
+  RawPointedDOMElement,
+  PointerMessage,
+  PointerMessageType,
+  ConnectionStatus,
+  ScreenshotRequestMessage,
+  ScreenshotResponseMessage,
+  ScreenshotErrorMessage,
 } from '@mcp-pointer/shared/types';
 import logger from '../utils/logger';
 
 export type StatusCallback = (status: ConnectionStatus, error?: string) => void;
+export type MessageHandler = (message: PointerMessage) => void;
 
 export class ElementSenderService {
   private ws: ReconnectingWebSocket | null = null;
@@ -12,6 +19,8 @@ export class ElementSenderService {
   private currentPort: number | null = null;
 
   private idleTimeout: NodeJS.Timeout | null = null;
+
+  private messageHandler: MessageHandler | null = null;
 
   private readonly IDLE_DURATION = 10000; // 10 seconds of inactivity
 
@@ -24,6 +33,13 @@ export class ElementSenderService {
   private readonly RECONNECTION_DELAY_GROW_FACTOR = 1.5; // Exponential backoff factor
 
   private readonly MAX_RETRIES = 10; // Maximum connection retry attempts
+
+  /**
+   * Set handler for incoming messages from server
+   */
+  public setMessageHandler(handler: MessageHandler): void {
+    this.messageHandler = handler;
+  }
 
   async sendElement(
     element: RawPointedDOMElement,
@@ -38,8 +54,9 @@ export class ElementSenderService {
       const connected = await this.ensureConnection(port, statusCallback);
       if (!connected) return;
 
-      // Start idle timer just before sending
-      this.startIdleTimer();
+      // NOTE: Idle timer disabled for screenshot feature
+      // Keep WebSocket connection alive for bidirectional communication
+      // this.startIdleTimer();
 
       // Now sending the element
       statusCallback?.(ConnectionStatus.SENDING);
@@ -58,6 +75,49 @@ export class ElementSenderService {
     } catch (error) {
       logger.error('Failed to send element:', error);
       statusCallback?.(ConnectionStatus.ERROR, (error as Error).message);
+    }
+  }
+
+  /**
+   * Send a screenshot response back to the server
+   */
+  async sendScreenshotResponse(
+    data: ScreenshotResponseMessage | ScreenshotErrorMessage,
+    messageType: PointerMessageType.SCREENSHOT_RESPONSE | PointerMessageType.SCREENSHOT_ERROR,
+  ): Promise<void> {
+    if (!this.isConnected) {
+      logger.error('Cannot send screenshot response - not connected');
+      return;
+    }
+
+    try {
+      const message: PointerMessage = {
+        type: messageType,
+        data,
+        timestamp: Date.now(),
+      };
+
+      this.ws!.send(JSON.stringify(message));
+      logger.info('📸 Screenshot response sent');
+    } catch (error) {
+      logger.error('Failed to send screenshot response:', error);
+    }
+  }
+
+  /**
+   * Send a generic message to the server (e.g., PONG for heartbeat)
+   */
+  public sendMessage(message: PointerMessage): void {
+    if (!this.isConnected) {
+      logger.debug('Cannot send message - not connected');
+      return;
+    }
+
+    try {
+      this.ws!.send(JSON.stringify(message));
+      logger.debug(`Message sent: ${message.type}`);
+    } catch (error) {
+      logger.error('Failed to send message:', error);
     }
   }
 
@@ -162,7 +222,16 @@ export class ElementSenderService {
     });
 
     this.ws.addEventListener('message', (event) => {
-      logger.debug('Received:', event.data);
+      try {
+        const message = JSON.parse(event.data) as PointerMessage;
+        logger.debug('📨 Received message:', message.type);
+
+        if (this.messageHandler) {
+          this.messageHandler(message);
+        }
+      } catch (error) {
+        logger.error('Failed to parse incoming message:', error);
+      }
     });
   }
 

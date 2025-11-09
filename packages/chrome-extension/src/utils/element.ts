@@ -29,16 +29,26 @@ export function getRawReactFiber(element: HTMLElement): any | undefined {
  * so we convert it to a plain object
  */
 export function getAllComputedStyles(element: HTMLElement): Record<string, string> {
-  const computedStyle = window.getComputedStyle(element);
-  const styles: Record<string, string> = {};
+  try {
+    const computedStyle = window.getComputedStyle(element);
+    const styles: Record<string, string> = {};
 
-  // Convert CSSStyleDeclaration to plain object
-  for (let i = 0; i < computedStyle.length; i += 1) {
-    const property = computedStyle[i];
-    styles[property] = computedStyle.getPropertyValue(property);
+    // Convert CSSStyleDeclaration to plain object
+    for (let i = 0; i < computedStyle.length; i += 1) {
+      const property = computedStyle[i];
+      styles[property] = computedStyle.getPropertyValue(property);
+    }
+
+    return styles;
+  } catch (error) {
+    // Handle cross-origin frame errors gracefully
+    // This can happen when the element is in or references a cross-origin iframe
+    logger.debug('Could not get computed styles (cross-origin frame):', error);
+    return {
+      '__error': 'Cross-origin frame access denied',
+      '__partial': 'true',
+    };
   }
-
-  return styles;
 }
 
 /**
